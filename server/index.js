@@ -129,6 +129,12 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json(req.user);
 });
 
+// 管理员统计
+app.get('/api/admin/stats', authMiddleware, adminMiddleware, (req, res) => {
+  const users = readUsers();
+  res.json({ userCount: users.users.length });
+});
+
 // ==================== 食堂/窗口接口 ====================
 
 // 获取食堂列表
@@ -151,15 +157,15 @@ app.get('/api/windows', (req, res) => {
 // 创建窗口
 app.post('/api/windows', (req, res) => {
   const data = readData();
-  const { cafeteria_id, name, window_no } = req.body;
-  if (!cafeteria_id || !name || !window_no) {
-    return res.status(400).json({ error: '食堂、窗口名称和编号不能为空' });
+  const { cafeteria_id, name, floor } = req.body;
+  if (!cafeteria_id || !name || !floor) {
+    return res.status(400).json({ error: '食堂、窗口名称和楼层不能为空' });
   }
   const newWindow = {
     id: Date.now(),
     cafeteria_id: parseInt(cafeteria_id),
     name,
-    window_no
+    window_no: floor
   };
   data.windows.push(newWindow);
   writeData(data);
@@ -168,16 +174,33 @@ app.post('/api/windows', (req, res) => {
 
 // ==================== 菜品接口 ====================
 
+function parseSortParam(raw) {
+  if (!raw) return [];
+  // URLSearchParams may encode comma as %2C, and pass it as a single string
+  const decoded = decodeURIComponent(raw);
+  if (decoded.includes(',')) return decoded.split(',').map(s => s.trim()).filter(Boolean);
+  return [decoded];
+}
+
 function applySort(dishes, sortParams) {
-  const sorts = Array.isArray(sortParams) ? sortParams : sortParams ? [sortParams] : [];
-  let result = [...dishes];
-  for (const sort of sorts) {
-    if (sort === 'love') result.sort((a, b) => (b.ratings?.love || 0) - (a.ratings?.love || 0));
-    else if (sort === 'dislike') result.sort((a, b) => (b.ratings?.dislike || 0) - (a.ratings?.dislike || 0));
-    else if (sort === 'incorrect') result.sort((a, b) => (b.ratings?.incorrect || 0) - (a.ratings?.incorrect || 0));
-    else if (sort === 'price') result.sort((a, b) => a.price - b.price);
+  const sorts = [];
+  if (Array.isArray(sortParams)) {
+    sortParams.forEach(p => sorts.push(...parseSortParam(p)));
+  } else {
+    sorts.push(...parseSortParam(sortParams));
   }
-  return result;
+  if (!sorts.length) return dishes;
+  return [...dishes].sort((a, b) => {
+    for (const sort of sorts) {
+      let cmp = 0;
+      if (sort === 'love') cmp = (b.ratings?.love || 0) - (a.ratings?.love || 0);
+      else if (sort === 'dislike') cmp = (b.ratings?.dislike || 0) - (a.ratings?.dislike || 0);
+      else if (sort === 'incorrect') cmp = (b.ratings?.incorrect || 0) - (a.ratings?.incorrect || 0);
+      else if (sort === 'price') cmp = a.price - b.price;
+      if (cmp !== 0) return cmp;
+    }
+    return 0;
+  });
 }
 
 // 获取菜品列表（支持多维排序、食堂筛选）
@@ -221,6 +244,7 @@ app.post('/api/dishes', authMiddleware, (req, res) => {
     name,
     ingredients: ingredients || '',
     price: parseFloat(price) || 0,
+    meal_type: meal_type || '正餐',
     ratings: { love: 0, dislike: 0, incorrect: 0 }
   };
   if (existing) {
@@ -235,7 +259,7 @@ app.post('/api/dishes', authMiddleware, (req, res) => {
 app.put('/api/dishes/:id', authMiddleware, (req, res) => {
   const data = readData();
   const id = parseInt(req.params.id);
-  const { window_id, name, ingredients, price } = req.body;
+  const { window_id, name, ingredients, price, meal_type } = req.body;
   const dishIndex = data.dishes.findIndex(d => d.id === id);
   if (dishIndex === -1) {
     return res.status(404).json({ error: '菜品不存在' });
@@ -244,6 +268,7 @@ app.put('/api/dishes/:id', authMiddleware, (req, res) => {
   if (name) data.dishes[dishIndex].name = name;
   if (ingredients !== undefined) data.dishes[dishIndex].ingredients = ingredients;
   if (price !== undefined) data.dishes[dishIndex].price = parseFloat(price);
+  if (meal_type !== undefined) data.dishes[dishIndex].meal_type = meal_type;
   writeData(data);
   res.json(data.dishes[dishIndex]);
 });
