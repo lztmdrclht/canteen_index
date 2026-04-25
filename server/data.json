@@ -60,91 +60,144 @@
       "window_id": 1,
       "name": "宫保鸡丁",
       "ingredients": "鸡肉,花生,辣椒",
-      "price": 12
+      "price": 12,
+      "ratings": {
+        "love": 1,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 2,
       "window_id": 1,
       "name": "麻婆豆腐",
       "ingredients": "豆腐,肉末,辣椒",
-      "price": 8
+      "price": 8,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 3,
       "window_id": 1,
       "name": "回锅肉",
       "ingredients": "猪肉,青椒,豆瓣",
-      "price": 15
+      "price": 15,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 4,
       "window_id": 2,
       "name": "白切鸡",
       "ingredients": "鸡肉,姜,葱",
-      "price": 18
+      "price": 18,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 5,
       "window_id": 2,
       "name": "清蒸鱼",
       "ingredients": "鱼,姜,酱油",
-      "price": 20
+      "price": 20,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 6,
       "window_id": 3,
       "name": "兰州拉面",
       "ingredients": "面条,牛肉,香菜",
-      "price": 12
+      "price": 12,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 7,
       "window_id": 3,
       "name": "刀削面",
       "ingredients": "面粉,肉酱,蔬菜",
-      "price": 10
+      "price": 10,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 8,
       "window_id": 4,
       "name": "辣椒炒肉",
       "ingredients": "猪肉,辣椒,蒜",
-      "price": 12
+      "price": 12,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 9,
       "window_id": 4,
       "name": "剁椒鱼头",
       "ingredients": "鱼头,剁椒,姜",
-      "price": 25
+      "price": 25,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 10,
       "window_id": 5,
       "name": "自助餐",
       "ingredients": "多种菜品",
-      "price": 25
+      "price": 25,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 11,
       "window_id": 6,
       "name": "羊肉泡馍",
       "ingredients": "羊肉,馍,粉丝",
-      "price": 18
+      "price": 18,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     },
     {
       "id": 12,
       "window_id": 6,
       "name": "手抓饭",
       "ingredients": "羊肉,胡萝卜,米饭",
-      "price": 15
-    },
-    {
-      "id": 1777114866911,
-      "window_id": 1,
-      "name": "������˿",
-      "ingredients": "����,ľ��,���ܲ�",
-      "price": 15
+      "price": 15,
+      "ratings": {
+        "love": 0,
+        "dislike": 0,
+        "incorrect": 0
+      }
     }
   ]
 }

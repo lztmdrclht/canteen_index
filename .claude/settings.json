@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npm install *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(node index.js)",
+      "Bash(curl -s http://localhost:3001/api/dishes)",
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"admin123\"}')",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }
