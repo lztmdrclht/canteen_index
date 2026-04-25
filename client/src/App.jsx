@@ -78,13 +78,17 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [sortBy, setSortBy] = useState('');
+  const [sortBys, setSortBys] = useState(new Set());
+  const [sortRating, setSortRating] = useState(''); // 豪吃/不喜欢二选一
+  const [filterCafeteria, setFilterCafeteria] = useState('');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState({ window_id: '', name: '', ingredients: '', price: '' });
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState('');
+  const [pendingOverride, setPendingOverride] = useState(false);
+  const [pendingFavDelete, setPendingFavDelete] = useState(null);
   const [isCreatingWindow, setIsCreatingWindow] = useState(false);
   const [newWindowData, setNewWindowData] = useState({ cafeteria_id: '', name: '', window_no: '' });
 
@@ -117,14 +121,19 @@ export default function App() {
     } else {
       setIsSearching(false);
     }
-  }, [searchQuery, sortBy]);
+  }, [searchQuery, sortBys, sortRating, filterCafeteria]);
 
   async function fetchData() {
     try {
+      const params = new URLSearchParams();
+      const allSorts = [...Array.from(sortBys)];
+      if (sortRating) allSorts.push(sortRating);
+      if (allSorts.length) params.set('sort', allSorts.join(','));
+      if (filterCafeteria) params.set('cafeteria_id', filterCafeteria);
       const [cafeteriasRes, windowsRes, dishesRes] = await Promise.all([
         fetch(`${API_BASE}/cafeterias`),
         fetch(`${API_BASE}/windows`),
-        fetch(`${API_BASE}/dishes${sortBy ? `?sort=${sortBy}` : ''}`)
+        fetch(`${API_BASE}/dishes?${params.toString()}`)
       ]);
       const [cafeteriasData, windowsData, dishesData] = await Promise.all([
         cafeteriasRes.json(),
@@ -142,7 +151,12 @@ export default function App() {
   async function fetchSearchResults() {
     setIsSearching(true);
     try {
-      const res = await fetch(`${API_BASE}/dishes/search?q=${encodeURIComponent(searchQuery)}${sortBy ? `&sort=${sortBy}` : ''}`);
+      const params = new URLSearchParams({ q: searchQuery });
+      const allSorts = [...Array.from(sortBys)];
+      if (sortRating) allSorts.push(sortRating);
+      if (allSorts.length) params.set('sort', allSorts.join(','));
+      if (filterCafeteria) params.set('cafeteria_id', filterCafeteria);
+      const res = await fetch(`${API_BASE}/dishes/search?${params.toString()}`);
       const results = await res.json();
       setSearchResults(results);
     } catch (err) {
@@ -228,7 +242,15 @@ export default function App() {
         const data = await res.json();
         setDishes(prev => prev.map(d => d.id === dishId ? { ...d, ratings: data.ratings } : d));
         setSearchResults(prev => prev.map(d => d.id === dishId ? { ...d, ratings: data.ratings } : d));
-        setMyRatings(prev => ({ ...prev, [dishId]: type }));
+        if (data.removed) {
+          setMyRatings(prev => {
+            const next = { ...prev };
+            delete next[dishId];
+            return next;
+          });
+        } else {
+          setMyRatings(prev => ({ ...prev, [dishId]: type }));
+        }
       }
     } catch (err) {
       console.error('评价失败:', err);
@@ -238,14 +260,10 @@ export default function App() {
   async function handleToggleFavorite(dishId) {
     if (!token) return;
     const isFav = favorites.some(f => f.id === dishId);
-    try {
-      if (isFav) {
-        await fetch(`${API_BASE}/favorites/${dishId}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setFavorites(prev => prev.filter(f => f.id !== dishId));
-      } else {
+    if (isFav) {
+      setPendingFavDelete(dishId);
+    } else {
+      try {
         await fetch(`${API_BASE}/favorites`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -253,9 +271,23 @@ export default function App() {
         });
         const dish = dishes.find(d => d.id === dishId);
         if (dish) setFavorites(prev => [...prev, dish]);
+      } catch (err) {
+        console.error('收藏操作失败:', err);
       }
+    }
+  }
+
+  async function confirmFavDelete() {
+    if (!pendingFavDelete || !token) return;
+    try {
+      await fetch(`${API_BASE}/favorites/${pendingFavDelete}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setFavorites(prev => prev.filter(f => f.id !== pendingFavDelete));
+      setPendingFavDelete(null);
     } catch (err) {
-      console.error('收藏操作失败:', err);
+      console.error('取消收藏失败:', err);
     }
   }
 
@@ -284,6 +316,22 @@ export default function App() {
       setSubmitMsg('请选择窗口并输入菜名');
       return;
     }
+    // 表单验证：禁止空格和英文字母
+    const nameVal = formData.name.trim();
+    const ingVal = (formData.ingredients || '').trim();
+    if (/[a-zA-Z\s]/.test(nameVal)) {
+      setSubmitMsg('菜名不能包含空格或英文字母');
+      return;
+    }
+    if (ingVal && /[a-zA-Z]/.test(ingVal)) {
+      setSubmitMsg('主要食材不能包含英文字母');
+      return;
+    }
+    if (formData.price && /[a-zA-Z\s]/.test(String(formData.price))) {
+      setSubmitMsg('价格不能包含空格或英文字母');
+      return;
+    }
+
     setSubmitting(true);
     setSubmitMsg('');
     try {
@@ -294,16 +342,49 @@ export default function App() {
         headers,
         body: JSON.stringify(formData)
       });
+      const data = await res.json();
+
+      if (data.exists) {
+        setSubmitMsg(`"${data.existing.name}" 已存在于该窗口，是否覆盖？`);
+        setPendingOverride(data.existing);
+        setSubmitting(false);
+        return;
+      }
       if (res.ok) {
         setSubmitMsg('提交成功！');
         setFormData({ window_id: '', name: '', ingredients: '', price: '' });
         fetchData();
       } else {
-        const data = await res.json();
         setSubmitMsg(data.error || '提交失败，请先登录');
       }
     } catch (err) {
       setSubmitMsg('提交失败: ' + err.message);
+    }
+    setSubmitting(false);
+  }
+
+  async function handleOverrideConfirm() {
+    if (!pendingOverride) return;
+    setSubmitting(true);
+    setSubmitMsg('');
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/dishes/${pendingOverride.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ ...formData, ratings: pendingOverride.ratings })
+      });
+      if (res.ok) {
+        setSubmitMsg('覆盖成功！');
+        setFormData({ window_id: '', name: '', ingredients: '', price: '' });
+        setPendingOverride(false);
+        fetchData();
+      } else {
+        setSubmitMsg('覆盖失败');
+      }
+    } catch (err) {
+      setSubmitMsg('覆盖失败: ' + err.message);
     }
     setSubmitting(false);
   }
@@ -352,7 +433,7 @@ export default function App() {
       {/* 顶部导航 */}
       <header className="bg-white shadow">
         <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-gray-800">食堂菜单检索</h1>
+          <h1 className="text-xl font-bold text-gray-800">交我吃</h1>
           <div className="flex items-center gap-3">
             {user ? (
               <>
@@ -524,13 +605,31 @@ export default function App() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">价格（元）</label>
-                <input type="number" value={formData.price} onChange={e => setFormData({ ...formData, price: e.target.value })} placeholder="请输入价格" className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="number" min="0.01" step="0.01" value={formData.price} onChange={e => setFormData({ ...formData, price: e.target.value })} placeholder="请输入价格" className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <button type="submit" disabled={submitting} className="w-full py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 transition">
                 {submitting ? '提交中...' : '提交'}
               </button>
               {submitMsg && <p className={`text-center ${submitMsg.includes('成功') ? 'text-green-600' : 'text-red-600'}`}>{submitMsg}</p>}
+              {pendingOverride && !submitting && (
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={handleOverrideConfirm} className="flex-1 py-2 bg-red-500 text-white rounded hover:bg-red-600">确认覆盖</button>
+                  <button type="button" onClick={() => { setPendingOverride(false); setSubmitMsg(''); }} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">取消</button>
+                </div>
+              )}
             </form>
+          </div>
+        )}
+
+        {/* 收藏删除确认 */}
+        {pendingFavDelete && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6 border-2 border-red-300">
+            <h2 className="text-lg font-semibold text-red-600 mb-3">确认取消收藏</h2>
+            <p className="text-gray-600 mb-4">确定要取消收藏这个菜品吗？</p>
+            <div className="flex gap-2">
+              <button onClick={confirmFavDelete} className="flex-1 py-2 bg-red-500 text-white rounded hover:bg-red-600">确认</button>
+              <button onClick={() => setPendingFavDelete(null)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">取消</button>
+            </div>
           </div>
         )}
 
@@ -546,16 +645,46 @@ export default function App() {
             />
             <button type="submit" className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium">搜索</button>
           </form>
-          {/* 排序选项 */}
+          {/* 排序与食堂筛选 */}
           <div className="flex flex-wrap gap-2 mt-3">
             <span className="text-sm text-gray-500">排序：</span>
-            {['', 'love', 'dislike', 'price'].map(s => (
+            <button
+              onClick={() => setSortRating(prev => prev === 'love' ? '' : 'love')}
+              className={`px-3 py-1 rounded text-sm transition ${sortRating === 'love' ? 'bg-pink-500 text-white' : 'bg-pink-50 text-pink-600 hover:bg-pink-100'}`}
+            >
+              豪吃最多
+            </button>
+            <button
+              onClick={() => setSortRating(prev => prev === 'dislike' ? '' : 'dislike')}
+              className={`px-3 py-1 rounded text-sm transition ${sortRating === 'dislike' ? 'bg-gray-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              不喜欢最多
+            </button>
+            <button
+              onClick={() => setSortBys(prev => {
+                const next = new Set(prev);
+                if (next.has('price')) next.delete('price');
+                else next.add('price');
+                return next;
+              })}
+              className={`px-3 py-1 rounded text-sm transition ${sortBys.has('price') ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              价格最低
+            </button>
+            <span className="text-sm text-gray-500 ml-2">食堂：</span>
+            <button
+              onClick={() => setFilterCafeteria('')}
+              className={`px-3 py-1 rounded text-sm transition ${filterCafeteria === '' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              全部
+            </button>
+            {cafeterias.map(c => (
               <button
-                key={s}
-                onClick={() => setSortBy(s)}
-                className={`px-3 py-1 rounded text-sm transition ${sortBy === s ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                key={c.id}
+                onClick={() => setFilterCafeteria(prev => prev === c.id ? '' : String(c.id))}
+                className={`px-3 py-1 rounded text-sm transition ${filterCafeteria === String(c.id) ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
-                {s === '' ? '默认' : s === 'love' ? '豪吃最多' : s === 'dislike' ? '不喜欢最多' : '价格最低'}
+                {c.name}
               </button>
             ))}
           </div>

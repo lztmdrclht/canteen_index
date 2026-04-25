@@ -168,43 +168,43 @@ app.post('/api/windows', (req, res) => {
 
 // ==================== 菜品接口 ====================
 
-// 获取菜品列表（支持排序）
+function applySort(dishes, sortParams) {
+  const sorts = Array.isArray(sortParams) ? sortParams : sortParams ? [sortParams] : [];
+  let result = [...dishes];
+  for (const sort of sorts) {
+    if (sort === 'love') result.sort((a, b) => (b.ratings?.love || 0) - (a.ratings?.love || 0));
+    else if (sort === 'dislike') result.sort((a, b) => (b.ratings?.dislike || 0) - (a.ratings?.dislike || 0));
+    else if (sort === 'incorrect') result.sort((a, b) => (b.ratings?.incorrect || 0) - (a.ratings?.incorrect || 0));
+    else if (sort === 'price') result.sort((a, b) => a.price - b.price);
+  }
+  return result;
+}
+
+// 获取菜品列表（支持多维排序、食堂筛选）
 app.get('/api/dishes', (req, res) => {
   const data = readData();
   let dishes = data.dishes;
-  const sort = req.query.sort;
-  if (sort === 'love') {
-    dishes = [...dishes].sort((a, b) => (b.ratings?.love || 0) - (a.ratings?.love || 0));
-  } else if (sort === 'dislike') {
-    dishes = [...dishes].sort((a, b) => (b.ratings?.dislike || 0) - (a.ratings?.dislike || 0));
-  } else if (sort === 'incorrect') {
-    dishes = [...dishes].sort((a, b) => (b.ratings?.incorrect || 0) - (a.ratings?.incorrect || 0));
-  } else if (sort === 'price') {
-    dishes = [...dishes].sort((a, b) => a.price - b.price);
+  const cafeteriaId = parseInt(req.query.cafeteria_id);
+  if (cafeteriaId) {
+    const windowIds = data.windows.filter(w => w.cafeteria_id === cafeteriaId).map(w => w.id);
+    dishes = dishes.filter(d => windowIds.includes(d.window_id));
   }
-  res.json(dishes);
+  res.json(applySort(dishes, req.query.sort));
 });
 
 // 搜索菜品
 app.get('/api/dishes/search', (req, res) => {
   const data = readData();
   const q = (req.query.q || '').toLowerCase().trim();
-  const sort = req.query.sort;
   let results = data.dishes.filter(dish => {
-    const nameMatch = dish.name.toLowerCase().includes(q);
-    const ingredientsMatch = dish.ingredients.toLowerCase().includes(q);
-    return nameMatch || ingredientsMatch;
+    return dish.name.toLowerCase().includes(q) || dish.ingredients.toLowerCase().includes(q);
   });
-  if (sort === 'love') {
-    results = results.sort((a, b) => (b.ratings?.love || 0) - (a.ratings?.love || 0));
-  } else if (sort === 'dislike') {
-    results = results.sort((a, b) => (b.ratings?.dislike || 0) - (a.ratings?.dislike || 0));
-  } else if (sort === 'incorrect') {
-    results = results.sort((a, b) => (b.ratings?.incorrect || 0) - (a.ratings?.incorrect || 0));
-  } else if (sort === 'price') {
-    results = results.sort((a, b) => a.price - b.price);
+  const cafeteriaId = parseInt(req.query.cafeteria_id);
+  if (cafeteriaId) {
+    const windowIds = data.windows.filter(w => w.cafeteria_id === cafeteriaId).map(w => w.id);
+    results = results.filter(d => windowIds.includes(d.window_id));
   }
-  res.json(results);
+  res.json(applySort(results, req.query.sort));
 });
 
 // 新增菜品（需登录）
@@ -214,6 +214,7 @@ app.post('/api/dishes', authMiddleware, (req, res) => {
   if (!window_id || !name) {
     return res.status(400).json({ error: 'window_id 和 name 不能为空' });
   }
+  const existing = data.dishes.find(d => d.window_id === parseInt(window_id) && d.name === name);
   const newDish = {
     id: Date.now(),
     window_id: parseInt(window_id),
@@ -222,9 +223,12 @@ app.post('/api/dishes', authMiddleware, (req, res) => {
     price: parseFloat(price) || 0,
     ratings: { love: 0, dislike: 0, incorrect: 0 }
   };
+  if (existing) {
+    return res.json({ exists: true, existing, newDish });
+  }
   data.dishes.push(newDish);
   writeData(data);
-  res.json(newDish);
+  res.json({ success: true, dish: newDish });
 });
 
 // 更新菜品
@@ -259,7 +263,7 @@ app.delete('/api/dishes/:id', authMiddleware, adminMiddleware, (req, res) => {
 
 // ==================== 评价接口 ====================
 
-// 提交/更新评价
+// 提交/更新评价（取消：type 为当前已有评价则清除）
 app.post('/api/ratings', authMiddleware, (req, res) => {
   const { dish_id, type } = req.body;
   if (!dish_id || !type) {
@@ -277,7 +281,6 @@ app.post('/api/ratings', authMiddleware, (req, res) => {
   if (!data.dishes[dishIndex].ratings) {
     data.dishes[dishIndex].ratings = { love: 0, dislike: 0, incorrect: 0 };
   }
-
   const userIndex = users.users.findIndex(u => u.id === req.user.id);
   if (userIndex === -1) {
     return res.status(404).json({ error: '用户不存在' });
@@ -287,9 +290,21 @@ app.post('/api/ratings', authMiddleware, (req, res) => {
   }
 
   const prevType = users.users[userIndex].ratings[dish_id];
+
+  // 如果点击的按钮与当前评价相同，则取消（toggle）
+  if (prevType === type) {
+    data.dishes[dishIndex].ratings[type] = Math.max(0, data.dishes[dishIndex].ratings[type] - 1);
+    delete users.users[userIndex].ratings[dish_id];
+    writeData(data);
+    writeUsers(users);
+    return res.json({ success: true, ratings: data.dishes[dishIndex].ratings, removed: true });
+  }
+
+  // 换其他评价：先扣掉旧的
   if (prevType) {
     data.dishes[dishIndex].ratings[prevType] = Math.max(0, data.dishes[dishIndex].ratings[prevType] - 1);
   }
+  // 再加新的
   data.dishes[dishIndex].ratings[type] = (data.dishes[dishIndex].ratings[type] || 0) + 1;
   users.users[userIndex].ratings[dish_id] = type;
 

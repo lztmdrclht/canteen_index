@@ -2,8 +2,8 @@
   "users": [
     {
       "id": 1,
-      "username": "admin",
-      "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+      "username": "walnut42",
+      "password": "ea38136cdedb852a02e6593a4d4a67b8371400e06d514b539944b9f40e1d4d92",
       "role": "admin",
       "created_at": "2026-01-01T00:00:00Z",
       "ratings": {
