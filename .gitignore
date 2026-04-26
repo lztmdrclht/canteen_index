@@ -2,6 +2,7 @@
 server/users.json
 server/data.json
 CHANGELOG.md
+todo.md
 
 # 通用忽略
 node_modules/

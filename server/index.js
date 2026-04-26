@@ -233,7 +233,7 @@ app.get('/api/dishes/search', (req, res) => {
 // 新增菜品（需登录）
 app.post('/api/dishes', authMiddleware, (req, res) => {
   const data = readData();
-  const { window_id, name, ingredients, price } = req.body;
+  const { window_id, name, ingredients, price, meal_type } = req.body;
   if (!window_id || !name) {
     return res.status(400).json({ error: 'window_id 和 name 不能为空' });
   }
