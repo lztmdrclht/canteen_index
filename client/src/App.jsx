@@ -2,9 +2,25 @@ import { useState, useEffect } from 'react';
 
 const API_BASE = '/api';
 
-function DishCard({ dish, window, cafeteria, user, token, myRating, isFavorited, onRate, onToggleFavorite, onDelete, highlight }) {
+function DishCard({ dish, window, cafeteria, user, token, myRating, myIncorrect, isFavorited, onRate, onReportIncorrect, onToggleFavorite, onDelete, highlight }) {
   const canAct = !!token;
   const canDelete = user?.role === 'admin';
+
+  // 计算平均评分（从 stars 对象计算）
+  const calcAvg = (ratings) => {
+    if (!ratings || !ratings.stars) return '暂无';
+    let total = 0, cnt = 0;
+    for (let s = 1; s <= 5; s++) {
+      total += s * (ratings.stars[s] || 0);
+      cnt += ratings.stars[s] || 0;
+    }
+    return cnt > 0 ? (total / cnt).toFixed(1) : '暂无';
+  };
+  const avgRating = calcAvg(dish.ratings);
+  // 评分人数
+  const ratingCount = dish.ratings?.stars ? Object.values(dish.ratings.stars).reduce((a, b) => a + b, 0) : 0;
+  // 获取报错数
+  const incorrectCount = dish.ratings?.incorrect || 0;
 
   return (
     <div id={`dish-${dish.id}`} className={`bg-white rounded-lg shadow p-4 ${highlight ? 'ring-4 ring-yellow-400' : ''}`}>
@@ -20,10 +36,12 @@ function DishCard({ dish, window, cafeteria, user, token, myRating, isFavorited,
               {dish.meal_type || '正餐'}
             </span>
           </p>
-          <div className="flex flex-wrap gap-3 mt-2 text-sm">
-            <span className="text-pink-500">&#10084; {dish.ratings?.love || 0}</span>
-            <span className="text-gray-400">&#128544; {dish.ratings?.dislike || 0}</span>
-            <span className="text-yellow-500">&#9888; {dish.ratings?.incorrect || 0}</span>
+          <div className="flex flex-wrap gap-3 mt-2 text-sm items-center">
+            <span className="text-yellow-500 font-bold">{avgRating !== '暂无' ? `${avgRating} ★` : '暂无评分'}</span>
+            <span className="text-gray-400 text-xs">({ratingCount} 人评分)</span>
+            {incorrectCount > 0 && (
+              <span className="text-red-400 text-xs">&#9888; 报错 {incorrectCount}</span>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 ml-4">
@@ -48,22 +66,23 @@ function DishCard({ dish, window, cafeteria, user, token, myRating, isFavorited,
         </div>
       </div>
       {canAct && (
-        <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+        <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100 justify-center items-center">
+          <div className="flex gap-1">
+            {[1, 2, 3, 4, 5].map(star => (
+              <button
+                key={star}
+                onClick={() => onRate(dish.id, star)}
+                className={`text-2xl transition ${myRating >= star ? 'text-yellow-400' : 'text-gray-300 hover:text-yellow-300'}`}
+                title={`${star}星`}
+              >
+                ★
+              </button>
+            ))}
+          </div>
           <button
-            onClick={() => onRate(dish.id, 'love')}
-            className={`flex-1 py-1 px-2 rounded text-sm transition ${myRating === 'love' ? 'bg-pink-500 text-white' : 'bg-pink-50 text-pink-600 hover:bg-pink-100'}`}
-          >
-            &#10084; 豪吃
-          </button>
-          <button
-            onClick={() => onRate(dish.id, 'dislike')}
-            className={`flex-1 py-1 px-2 rounded text-sm transition ${myRating === 'dislike' ? 'bg-gray-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-          >
-            &#128544; 不喜欢
-          </button>
-          <button
-            onClick={() => onRate(dish.id, 'incorrect')}
-            className={`flex-1 py-1 px-2 rounded text-sm transition ${myRating === 'incorrect' ? 'bg-yellow-500 text-white' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'}`}
+            onClick={() => onReportIncorrect(dish.id)}
+            className={`px-2 py-1 rounded text-xs transition ${myIncorrect ? 'bg-red-500 text-white' : 'bg-red-50 text-red-500 hover:bg-red-100'}`}
+            title="报错"
           >
             &#9888; 有误
           </button>
@@ -83,7 +102,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [sortRating, setSortRating] = useState(''); // 豪吃/不喜欢二选一
+  const [sortRating, setSortRating] = useState(''); // rating 二选一
   const [filterCafeteria, setFilterCafeteria] = useState('');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
@@ -105,6 +124,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
 
   const [myRatings, setMyRatings] = useState({});
+  const [myIncorrects, setMyIncorrects] = useState({});
   const [favorites, setFavorites] = useState([]);
   const [userCount, setUserCount] = useState(null);
   const [randomDishId, setRandomDishId] = useState(null);
@@ -116,6 +136,7 @@ export default function App() {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
       fetchMyRatings(savedToken);
+      fetchMyIncorrects(savedToken);
       fetchFavorites(savedToken);
       if (JSON.parse(savedUser).role === 'admin') fetchStats(savedToken);
     }
@@ -174,9 +195,41 @@ export default function App() {
         headers: { Authorization: `Bearer ${t}` }
       });
       const ratings = await res.json();
-      setMyRatings(ratings);
+      // 分离评分和报错 - 支持新格式 {star: X, incorrect: true} 和旧格式 X
+      const newRatings = {};
+      const newIncorrects = {};
+      for (const [dishId, value] of Object.entries(ratings)) {
+        if (typeof value === 'object' && value !== null) {
+          if (value.star) newRatings[dishId] = value.star;
+          if (value.incorrect) newIncorrects[dishId] = true;
+        } else if (value === 'incorrect') {
+          newIncorrects[dishId] = true;
+        } else if (typeof value === 'number') {
+          newRatings[dishId] = value;
+        }
+      }
+      setMyRatings(newRatings);
+      setMyIncorrects(newIncorrects);
     } catch (err) {
       console.error('获取评价失败:', err);
+    }
+  }
+
+  async function fetchMyIncorrects(t) {
+    try {
+      const res = await fetch(`${API_BASE}/ratings/me`, {
+        headers: { Authorization: `Bearer ${t}` }
+      });
+      const ratings = await res.json();
+      const newIncorrects = {};
+      for (const [dishId, value] of Object.entries(ratings)) {
+        if (value === 'incorrect') {
+          newIncorrects[dishId] = true;
+        }
+      }
+      setMyIncorrects(newIncorrects);
+    } catch (err) {
+      console.error('获取报错失败:', err);
     }
   }
 
@@ -241,35 +294,49 @@ export default function App() {
     setUser(null);
     setToken(null);
     setMyRatings({});
+    setMyIncorrects({});
     setFavorites([]);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
   }
 
-  async function handleRate(dishId, type) {
+  async function handleRate(dishId, star) {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE}/ratings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ dish_id: dishId, type })
+        body: JSON.stringify({ dish_id: dishId, star })
       });
       if (res.ok) {
         const data = await res.json();
         setDishes(prev => prev.map(d => d.id === dishId ? { ...d, ratings: data.ratings } : d));
         setSearchResults(prev => prev.map(d => d.id === dishId ? { ...d, ratings: data.ratings } : d));
-        if (data.removed) {
-          setMyRatings(prev => {
-            const next = { ...prev };
-            delete next[dishId];
-            return next;
-          });
-        } else {
-          setMyRatings(prev => ({ ...prev, [dishId]: type }));
-        }
+        // 更新我的评分状态
+        fetchMyRatings(token);
       }
     } catch (err) {
       console.error('评价失败:', err);
+    }
+  }
+
+  async function handleReportIncorrect(dishId) {
+    if (!token) return;
+    const isReported = myIncorrects[dishId];
+    try {
+      const res = await fetch(`${API_BASE}/ratings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ dish_id: dishId, incorrect: !isReported })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDishes(prev => prev.map(d => d.id === dishId ? { ...d, ratings: data.ratings } : d));
+        setSearchResults(prev => prev.map(d => d.id === dishId ? { ...d, ratings: data.ratings } : d));
+        fetchMyRatings(token);
+      }
+    } catch (err) {
+      console.error('报错失败:', err);
     }
   }
 
@@ -699,16 +766,16 @@ export default function App() {
           <div className="flex flex-wrap gap-2 mt-3">
             <span className="text-sm text-gray-500">排序：</span>
             <button
-              onClick={() => setSortRating(prev => prev === 'love' ? '' : 'love')}
-              className={`px-3 py-1 rounded text-sm transition ${sortRating === 'love' ? 'bg-pink-500 text-white' : 'bg-pink-50 text-pink-600 hover:bg-pink-100'}`}
+              onClick={() => setSortRating(prev => prev === 'rating' ? '' : 'rating')}
+              className={`px-3 py-1 rounded text-sm transition ${sortRating === 'rating' ? 'bg-yellow-500 text-white' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'}`}
             >
-              豪吃最多
+              评分最高
             </button>
             <button
-              onClick={() => setSortRating(prev => prev === 'dislike' ? '' : 'dislike')}
-              className={`px-3 py-1 rounded text-sm transition ${sortRating === 'dislike' ? 'bg-gray-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              onClick={() => setSortRating(prev => prev === 'incorrect' ? '' : 'incorrect')}
+              className={`px-3 py-1 rounded text-sm transition ${sortRating === 'incorrect' ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
             >
-              不喜欢最多
+              报错最多
             </button>
             <span className="text-sm text-gray-500 ml-2">食堂：</span>
             <button
@@ -765,8 +832,10 @@ export default function App() {
                     user={user}
                     token={token}
                     myRating={myRatings[dish.id]}
+                    myIncorrect={myIncorrects[dish.id]}
                     isFavorited={favoriteIds.includes(dish.id)}
                     onRate={handleRate}
+                    onReportIncorrect={handleReportIncorrect}
                     onToggleFavorite={handleToggleFavorite}
                     onDelete={handleDelete}
                     highlight={randomDishId === dish.id}

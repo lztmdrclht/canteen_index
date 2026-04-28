@@ -1,8 +1,12 @@
 # 忽略运行时数据文件
 server/users.json
 server/data.json
+
 CHANGELOG.md
 todo.md
+deploy_test.py
+deploy_test.sh
+deploy.sh
 
 # 通用忽略
 node_modules/
